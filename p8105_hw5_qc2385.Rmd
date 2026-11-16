@@ -25,8 +25,6 @@ scale_fill_discrete = scale_fill_viridis_d
 ```
 
 ```{r}
-library(tidyverse)
-
 set.seed(1236)
 ```
 
@@ -168,3 +166,108 @@ Subjects in the control arm stay roughly flat over the 8 weeks
 (mean `r round(con_w8, 2)` at week 8), 
 while subjects in the experimental arm increase over time in a roughly linear way (mean `r round(exp_w8, 2)` at week 8). 
 Therefore, the experimental arm shows a clear upward trend that the control arm does not.
+
+
+## Problem 3
+Write a function that simulates one dataset and runs a one-sample t-test.
+
+```{r}
+sim_ttest = function(n_obs = 30, mu = 0, sigma = 5) {
+
+  sim_data = tibble(
+    x = rnorm(n = n_obs, mean = mu, sd = sigma)
+  )
+
+  t.test(pull(sim_data, x), mu = 0) |>
+    broom::tidy() |>
+    select(mu_hat = estimate, p_value = p.value)
+
+}
+```
+
+Generate 5000 datasets for each true mean from 0 to 6.
+
+```{r}
+ttest_results_df =
+  expand_grid(
+    true_mu = 0:6,
+    iter = 1:5000
+  ) |>
+  mutate(
+    est_df = map(true_mu, \(m) sim_ttest(mu = m))
+  ) |>
+  unnest(est_df) |>
+  mutate(reject = p_value < 0.05)
+```
+
+Plot the power of the test against the true mean.
+
+```{r}
+ttest_results_df |>
+  group_by(true_mu) |>
+  summarize(power = mean(reject)) |>
+  ggplot(aes(x = true_mu, y = power)) +
+  geom_point() +
+  geom_line() +
+  labs(
+    title = "Power of the one-sample t-test by true mean",
+    x = "True mean (mu)",
+    y = "Power (proportion of null rejected)"
+  )
+```
+
+```{r include = FALSE}
+power_df =
+  ttest_results_df |>
+  group_by(true_mu) |>
+  summarize(power = mean(reject))
+
+power_0 = power_df |> filter(true_mu == 0) |> pull(power)
+power_1 = power_df |> filter(true_mu == 1) |> pull(power)
+power_3 = power_df |> filter(true_mu == 3) |> pull(power)
+power_6 = power_df |> filter(true_mu == 6) |> pull(power)
+```
+
+Power increases with effect size. When the true mean is 0, the null is rejected `r round(power_0 * 100, 1)`% of the time (close to alpha = 0.05). Power is only `r round(power_1 * 100, 1)`% when the true mean is 1, rises to `r round(power_3 * 100, 1)`% at 3, and reaches `r round(power_6 * 100, 1)`% at 6. Therefore, larger effect sizes are much more likely to be detected.
+
+Plot the average estimate of mu_hat, in all samples and only in samples where the null was rejected.
+
+```{r}
+mu_hat_df =
+  ttest_results_df |>
+  group_by(true_mu) |>
+  summarize(
+    all_samples = mean(mu_hat),
+    null_rejected = mean(mu_hat[reject])
+  ) |>
+  pivot_longer(
+    all_samples:null_rejected,
+    names_to = "sample",
+    values_to = "avg_mu_hat"
+  ) |>
+  mutate(
+    sample = if_else(sample == "all_samples", "All samples", "Null rejected only")
+  )
+
+mu_hat_df |>
+  ggplot(aes(x = true_mu, y = avg_mu_hat, color = sample)) +
+  geom_point() +
+  geom_line() +
+  labs(
+    title = "Average estimate of mu vs true mu",
+    x = "True mean (mu)",
+    y = "Average estimate of mu",
+    color = ""
+  )
+```
+
+```{r include = FALSE}
+rej_1 = mu_hat_df |> filter(true_mu == 1, sample == "Null rejected only") |> pull(avg_mu_hat)
+rej_2 = mu_hat_df |> filter(true_mu == 2, sample == "Null rejected only") |> pull(avg_mu_hat)
+rej_6 = mu_hat_df |> filter(true_mu == 6, sample == "Null rejected only") |> pull(avg_mu_hat)
+```
+
+Across all samples, the average mu_hat is very close to the true mean, since the sample mean is unbiased. In samples where the null was rejected, the average mu_hat is too high when the effect size is small, and gets close to the truth for large effect sizes.
+
+Therefore, the sample average of mu_hat across tests that reject the null is not equal to the true mean when power is low. With small effects, only samples that happen to have a large mu_hat reach significance, so selecting on p< 0.05 overestimates the effect. When power is close to 1, almost all samples are rejected, so this selection has little effect and the average is close to the truth.
+
