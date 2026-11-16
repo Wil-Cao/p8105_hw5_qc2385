@@ -32,7 +32,6 @@ set.seed(1236)
 
 
 ## Problem 1
-
 Write a function that draws birthdays for a group and checks for duplicates.
 ```{r}
 birthday_repeated = function(n_people) {
@@ -96,3 +95,76 @@ prob_50 =
 
 The probability of a shared birthday increases quickly with group size. It is close to 0 for very small groups, passes 50% at a group size of `r n_half`, and reaches about `r round(prob_50 * 100, 1)`% with 50 people. Therefore, even a moderately sized group is likely to have at least two people with the same birthday.
 
+
+## Problem 2
+
+Start with a dataframe of all file names, then read in data for each subject using map.
+
+```{r message = FALSE}
+study_df =
+  tibble(
+    files = list.files("data/", pattern = "\\.csv$"),
+    path = str_c("data/", files)
+  ) |>
+  mutate(data = map(path, read_csv)) |>
+  unnest(data)
+```
+
+Tidy the result: get arm and subject ID from the file name, and make weekly observations long.
+
+```{r}
+study_tidy_df =
+  study_df |>
+  mutate(files = str_replace(files, "\\.csv", "")) |>
+  separate(files, into = c("arm", "subject_id"), sep = "_") |>
+  mutate(
+    arm = if_else(arm == "con", "Control", "Experimental"),
+    subject_id = str_c(arm, "_", subject_id)
+  ) |>
+  pivot_longer(
+    week_1:week_8,
+    names_to = "week",
+    values_to = "observation",
+    names_prefix = "week_"
+  ) |>
+  mutate(week = as.numeric(week)) |>
+  select(arm, subject_id, week, observation)
+
+study_tidy_df
+```
+
+Make a spaghetti plot showing observations on each subject over time.
+
+```{r}
+study_tidy_df |>
+  ggplot(aes(x = week, y = observation, group = subject_id, color = arm)) +
+  geom_point(alpha = .5) +
+  geom_line(alpha = .7) +
+  labs(
+    title = "Observations over time for each subject",
+    x = "Week",
+    y = "Observation",
+    color = "Arm"
+  )
+```
+
+```{r include = FALSE}
+arm_means =
+  study_tidy_df |>
+  filter(week %in% c(1, 8)) |>
+  group_by(arm, week) |>
+  summarize(mean_obs = mean(observation), .groups = "drop")
+
+con_w1 = arm_means |> filter(arm == "Control", week == 1) |> pull(mean_obs)
+con_w8 = arm_means |> filter(arm == "Control", week == 8) |> pull(mean_obs)
+exp_w1 = arm_means |> filter(arm == "Experimental", week == 1) |> pull(mean_obs)
+exp_w8 = arm_means |> filter(arm == "Experimental", week == 8) |> pull(mean_obs)
+```
+
+The two arms start at similar levels in week 1 
+(mean `r round(con_w1, 2)` in control vs 
+`r round(exp_w1, 2)` in experimental). 
+Subjects in the control arm stay roughly flat over the 8 weeks 
+(mean `r round(con_w8, 2)` at week 8), 
+while subjects in the experimental arm increase over time in a roughly linear way (mean `r round(exp_w8, 2)` at week 8). 
+Therefore, the experimental arm shows a clear upward trend that the control arm does not.
